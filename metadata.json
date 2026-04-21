@@ -1,0 +1,6 @@
+{
+  "name": "Arabic Library Manager",
+  "description": "Sheet-backed book library app with Gemini AI book cover scanning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

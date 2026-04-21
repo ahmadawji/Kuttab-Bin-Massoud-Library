@@ -5,6 +5,7 @@ import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
 import cookieParser from 'cookie-parser';
 import { google } from 'googleapis';
+import fs from 'fs';
 
 // The spreadsheet API logic will be moved to separate endpoints
 async function startServer() {
@@ -278,15 +279,15 @@ async function startServer() {
       // Fallback: Check if user pasted it directly into .env.example
       try {
         const envExamplePath = path.join(process.cwd(), '.env.example');
-        if (require('fs').existsSync(envExamplePath)) {
-          const envExample = require('fs').readFileSync(envExamplePath, 'utf8');
+        if (fs.existsSync(envExamplePath)) {
+          const envExample = fs.readFileSync(envExamplePath, 'utf8');
           const match = envExample.match(/GEMINI_API_KEY=["']?(AIza[a-zA-Z0-9-_]+)["']?/);
           if (match && match[1]) {
             currentGeminiKey = match[1];
           }
         }
       } catch (e) {
-        // Ignore read errors
+        console.error("Fallback file read error:", e);
       }
 
       if (!currentGeminiKey) {
@@ -294,6 +295,8 @@ async function startServer() {
       }
 
       // Initialize Gemini locally inside the request to ensure latest env var is used
+      console.log("USING KEY:", currentGeminiKey ? currentGeminiKey.substring(0, 10) + "..." : "NONE");
+      fs.writeFileSync('./dev-log.txt', "USING KEY: " + (currentGeminiKey ? currentGeminiKey.substring(0, 10) + "..." : "NONE") + "\n", { flag: 'a' });
       const ai = new GoogleGenAI({ apiKey: currentGeminiKey });
 
       const base64EncodeString = req.file.buffer.toString('base64');
@@ -332,14 +335,20 @@ async function startServer() {
       res.json(extractedData);
     } catch (error: any) {
       console.error("Gemini Error:", error);
+      console.error("Gemini Error JSON:", JSON.stringify(error, null, 2));
+      fs.writeFileSync('./dev-log.txt', "ERROR JSON: " + JSON.stringify(error, null, 2) + "\n", { flag: 'a' });
       
+      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('API key not valid')) {
+        return res.status(400).json({ error: 'مفتاح الذكاء الاصطناعي (API Key) غير صالح.' });
+      }
+
       const status = error.status || error?.response?.status;
       if (status === 429) {
         return res.status(429).json({ error: 'عفواً، لقد تجاوزت الحد المسموح به مجاناً من جوجل (Quota Exceeded)، أو أن مفتاحك لا يحتوي على خطة دفع نشطة.' });
       }
       
-      if (error.message?.includes('API_KEY_INVALID') || status === 400) {
-        return res.status(400).json({ error: 'مفتاح الذكاء الاصطناعي (API Key) غير صالح.' });
+      if (status === 400) {
+        return res.status(400).json({ error: error.message || 'تعذر معالجة الصورة، قد تكون الصيغة غير مدعومة أو الصورة تالفة.' });
       }
 
       res.status(500).json({ error: error.message || 'Error parsing image' });

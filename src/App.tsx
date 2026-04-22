@@ -453,6 +453,7 @@ function BookFormModal({ book, onClose, onSave }: { book: Book | null, onClose: 
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -465,19 +466,31 @@ function BookFormModal({ book, onClose, onSave }: { book: Book | null, onClose: 
         method: 'POST',
         body: formDataPayload
       });
-      if (!res.ok) throw new Error('فشل في تحليل الصورة');
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Server error: ${res.status}`);
+      }
+      
       const data = await res.json();
       
+      // Map backend response to form data - backend returns bookName, we use name
       setFormData(prev => ({
         ...prev,
-        ...data // Merges bookName as name? Wait, backend returned bookName
+        name: data.bookName || prev.name,
+        author: data.author || prev.author,
+        publisher: data.publisher || prev.publisher,
+        classification: data.classification || prev.classification,
       }));
-      if (data.bookName) setFormData(prev => ({ ...prev, name: data.bookName }));
-    } catch (err) {
-      alert('لم نتمكن من استخراج البيانات من الصورة بنجاح.');
+    } catch (err: any) {
+      console.error('Image extraction error:', err);
+      alert(`لم نتمكن من استخراج البيانات من الصورة بنجاح: ${err.message}`);
     } finally {
       setIsScanning(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      // Reset file input for next upload
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 

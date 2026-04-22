@@ -1,11 +1,12 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import multer from 'multer';
-import { GoogleGenAI } from '@google/genai';
 import cookieParser from 'cookie-parser';
 import { google } from 'googleapis';
 import fs from 'fs';
+import { OpenRouter } from '@openrouter/sdk';
 
 // The spreadsheet API logic will be moved to separate endpoints
 async function startServer() {
@@ -274,81 +275,92 @@ async function startServer() {
         return res.status(400).json({ error: 'No image provided' });
       }
 
-      let currentGeminiKey = process.env.GEMINI_API_KEY;
-      
-      // Fallback: Check if user pasted it directly into .env.example
-      try {
-        const envExamplePath = path.join(process.cwd(), '.env.example');
-        if (fs.existsSync(envExamplePath)) {
-          const envExample = fs.readFileSync(envExamplePath, 'utf8');
-          const match = envExample.match(/GEMINI_API_KEY=["']?(AIza[a-zA-Z0-9-_]+)["']?/);
-          if (match && match[1]) {
-            currentGeminiKey = match[1];
-          }
-        }
-      } catch (e) {
-        console.error("Fallback file read error:", e);
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+      if (!openrouterKey) {
+        throw new Error('OpenRouter API Key غير متوفر في النظام. الرجاء التحقق من متغيرات البيئة.');
       }
 
-      if (!currentGeminiKey) {
-        throw new Error('مفتاح الذكاء الاصطناعي (Gemini API Key) غير متوفر في النظام. الرجاء التحقق من قائمة Settings -> Secrets.');
-      }
-
-      // Initialize Gemini locally inside the request to ensure latest env var is used
-      console.log("USING KEY:", currentGeminiKey ? currentGeminiKey.substring(0, 10) + "..." : "NONE");
-      fs.writeFileSync('./dev-log.txt', "USING KEY: " + (currentGeminiKey ? currentGeminiKey.substring(0, 10) + "..." : "NONE") + "\n", { flag: 'a' });
-      const ai = new GoogleGenAI({ apiKey: currentGeminiKey });
-
-      const base64EncodeString = req.file.buffer.toString('base64');
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            inlineData: {
-              mimeType: req.file.mimetype,
-              data: base64EncodeString,
-            },
-          },
-          "Extract the book details from this cover image. Focus on: Book Name, Author, Publisher, and Classification (e.g., History, Literature). If you can't determine something, leave it blank."
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              bookName: { type: 'STRING' },
-              author: { type: 'STRING' },
-              publisher: { type: 'STRING' },
-              classification: { type: 'STRING' },
-            },
-          },
-        },
+      // Initialize OpenRouter SDK
+      const openrouter = new OpenRouter({
+        apiKey: openrouterKey
       });
 
-      const jsonStr = response.text?.trim();
-      if (!jsonStr) {
-        return res.status(500).json({ error: 'Failed to extract text' });
+      // Convert image buffer to base64
+      const base64Image = req.file.buffer.toString('base64');
+      const mimeType = req.file.mimetype;
+
+      // Call OpenRouter API with vision model
+      const stream = await openrouter.chat.send({
+        chatRequest: {
+          model: 'google/gemma-4-31b-it:free',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `Extract book details from this cover image. Return ONLY valid JSON:
+                {
+                  "bookName": "book title or empty string",
+                  "author": "author name or empty string",
+                  "publisher": "publisher name or empty string",
+                  "classification": "category like History, Literature, Science or empty string"
+                }`
+                },
+                {
+                  type: 'image_url',
+                  imageUrl: {
+                    url: `data:${mimeType};base64,${base64Image}`
+                  }
+                }
+              ]
+            }
+          ],
+          stream: true
+        }
+      });
+
+      // Collect streamed response
+      let fullResponse = '';
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          fullResponse += content;
+        }
+      }
+
+      if (!fullResponse) {
+        return res.status(500).json({ error: 'Failed to extract text from image' });
+      }
+
+      console.log('OpenRouter Response:', fullResponse);
+
+      // Parse JSON from response (might have markdown code blocks)
+      let jsonStr = fullResponse;
+      const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
       }
 
       const extractedData = JSON.parse(jsonStr);
       res.json(extractedData);
     } catch (error: any) {
-      console.error("Gemini Error:", error);
-      console.error("Gemini Error JSON:", JSON.stringify(error, null, 2));
-      fs.writeFileSync('./dev-log.txt', "ERROR JSON: " + JSON.stringify(error, null, 2) + "\n", { flag: 'a' });
-      
-      if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('API key not valid')) {
-        return res.status(400).json({ error: 'مفتاح الذكاء الاصطناعي (API Key) غير صالح.' });
+      console.error('OpenRouter Error:', error.message);
+      console.error('Full Error:', JSON.stringify(error.response?.data || error, null, 2));
+
+      if (error.message?.includes('API key')) {
+        return res.status(400).json({ error: 'مفتاح OpenRouter غير صالح أو غير موجود.' });
       }
 
-      const status = error.status || error?.response?.status;
-      if (status === 429) {
-        return res.status(429).json({ error: 'عفواً، لقد تجاوزت الحد المسموح به مجاناً من جوجل (Quota Exceeded)، أو أن مفتاحك لا يحتوي على خطة دفع نشطة.' });
+      if (error.status === 429) {
+        return res.status(429).json({ error: 'لقد تجاوزت حد الطلبات. يرجى المحاولة لاحقاً.' });
       }
-      
-      if (status === 400) {
-        return res.status(400).json({ error: error.message || 'تعذر معالجة الصورة، قد تكون الصيغة غير مدعومة أو الصورة تالفة.' });
+
+      if (error.status === 400) {
+        const errorMsg = error.message || 'تعذر معالجة الصورة، قد تكون الصيغة غير مدعومة أو الصورة تالفة.';
+        console.error('400 Error Details:', errorMsg);
+        return res.status(400).json({ error: errorMsg });
       }
 
       res.status(500).json({ error: error.message || 'Error parsing image' });

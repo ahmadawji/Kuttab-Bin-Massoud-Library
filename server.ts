@@ -11,78 +11,83 @@ import { OpenRouter } from '@openrouter/sdk';
 // The spreadsheet API logic will be moved to separate endpoints
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 3001;
 
   app.use(express.json());
   app.use(cookieParser());
-  
+
   // Storage for multer array
   const upload = multer({ storage: multer.memoryStorage() });
 
   // API Routes
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
   });
 
   // Helper to ensure dynamic host resolution
   function getRedirectUri(req: express.Request) {
-    const host = req.headers['x-forwarded-host'] || req.get('host');
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers["x-forwarded-host"] || req.get("host");
+    const protocol = req.headers["x-forwarded-proto"] || "https";
     return `${protocol}://${host}/auth/callback`;
   }
 
   // Check if OAuth is configured
-  app.get('/api/auth/status', (req, res) => {
-    const isConfigured = !!(process.env.OAUTH_CLIENT_ID && process.env.OAUTH_CLIENT_SECRET);
+  app.get("/api/auth/status", (req, res) => {
+    const isConfigured = !!(
+      process.env.OAUTH_CLIENT_ID && process.env.OAUTH_CLIENT_SECRET
+    );
     res.json({ configured: isConfigured });
   });
 
   // Get Auth URL
-  app.get('/api/auth/url', (req, res) => {
-    const origin = (req.query.origin as string) || getRedirectUri(req).replace('/auth/callback', '');
+  app.get("/api/auth/url", (req, res) => {
+    const origin =
+      (req.query.origin as string) ||
+      getRedirectUri(req).replace("/auth/callback", "");
     const redirectUri = `${origin}/auth/callback`;
     const oauth2Client = new google.auth.OAuth2(
       process.env.OAUTH_CLIENT_ID,
       process.env.OAUTH_CLIENT_SECRET,
-      redirectUri
+      redirectUri,
     );
 
     const scopes = [
-      'https://www.googleapis.com/auth/userinfo.profile',
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/spreadsheets'
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/spreadsheets",
     ];
 
     const url = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
+      access_type: "offline",
       scope: scopes,
-      prompt: 'consent',
-      state: origin // Pass origin in state to use later in callback
+      prompt: "consent",
+      state: origin, // Pass origin in state to use later in callback
     });
 
     res.json({ url });
   });
 
   // Auth callback
-  app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+  app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
     const { code, state } = req.query;
     try {
-      const origin = (state as string) || getRedirectUri(req).replace('/auth/callback', '');
+      const origin =
+        (state as string) || getRedirectUri(req).replace("/auth/callback", "");
       const redirectUri = `${origin}/auth/callback`;
       const oauth2Client = new google.auth.OAuth2(
         process.env.OAUTH_CLIENT_ID,
         process.env.OAUTH_CLIENT_SECRET,
-        redirectUri
+        redirectUri,
       );
-      
+
       const { tokens } = await oauth2Client.getToken(code as string);
-      
+
       // Store token in a secure HttpOnly cookie
-      res.cookie('g_tokens', JSON.stringify(tokens), {
+      res.cookie("g_tokens", JSON.stringify(tokens), {
         secure: true,
-        sameSite: 'none',
+        sameSite: "none",
         httpOnly: true,
-        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
 
       res.send(`
@@ -102,227 +107,339 @@ async function startServer() {
       `);
     } catch (e) {
       console.error(e);
-      res.status(500).send('Authentication failed.');
+      res.status(500).send("Authentication failed.");
     }
   });
 
   // Auth status for frontend
-  app.get('/api/auth/me', async (req, res) => {
+  app.get("/api/auth/me", async (req, res) => {
     try {
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr) return res.status(401).json({ error: 'Not authenticated' });
-      
+      if (!tokensStr)
+        return res.status(401).json({ error: "Not authenticated" });
+
       const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(process.env.OAUTH_CLIENT_ID, process.env.OAUTH_CLIENT_SECRET);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.OAUTH_CLIENT_ID,
+        process.env.OAUTH_CLIENT_SECRET,
+      );
       oauth2Client.setCredentials(tokens);
 
-      const oauth2 = google.oauth2({ auth: oauth2Client, version: 'v2' });
+      const oauth2 = google.oauth2({ auth: oauth2Client, version: "v2" });
       const userInfo = await oauth2.userinfo.get();
       res.json(userInfo.data);
     } catch (e) {
-      res.status(401).json({ error: 'Invalid tokens' });
+      res.status(401).json({ error: "Invalid tokens" });
     }
   });
 
-  app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('g_tokens', { secure: true, sameSite: 'none', httpOnly: true });
+  app.post("/api/auth/logout", (req, res) => {
+    res.clearCookie("g_tokens", {
+      secure: true,
+      sameSite: "none",
+      httpOnly: true,
+    });
     res.json({ success: true });
   });
 
   // Get books from Google Sheets
-  app.get('/api/books', async (req, res) => {
+  app.get("/api/books", async (req, res) => {
     try {
       const sheetId = req.query.sheetId || process.env.GOOGLE_SHEETS_ID;
-      if (!sheetId) return res.status(400).json({ error: 'No Sheet ID provided' });
+      if (!sheetId)
+        return res.status(400).json({ error: "No Sheet ID provided" });
 
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr) return res.status(401).json({ error: 'Not authenticated' });
-      
+      if (!tokensStr)
+        return res.status(401).json({ error: "Not authenticated" });
+
       const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(process.env.OAUTH_CLIENT_ID, process.env.OAUTH_CLIENT_SECRET);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.OAUTH_CLIENT_ID,
+        process.env.OAUTH_CLIENT_SECRET,
+      );
       oauth2Client.setCredentials(tokens);
 
-      const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-      
+      const sheets = google.sheets({ version: "v4", auth: oauth2Client });
+
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId as string,
-        range: 'A2:G', // Removed Sheet1! to use default first sheet regardless of language
+        range: "A2:G", // Removed Sheet1! to use default first sheet regardless of language
       });
 
       const rows = response.data.values || [];
       const books = rows.map((row, index) => ({
         id: index + 2, // Row number in sheet (used for update/delete)
-        name: row[0] || '',
-        author: row[1] || '',
-        publisher: row[2] || '',
-        investigator: row[3] || '',
-        classification: row[4] || '',
-        volumes: row[5] || '',
-        notes: row[6] || ''
+        name: row[0] || "",
+        author: row[1] || "",
+        publisher: row[2] || "",
+        investigator: row[3] || "",
+        classification: row[4] || "",
+        volumes: row[5] || "",
+        notes: row[6] || "",
       }));
 
       res.json(books);
     } catch (error: any) {
       const googleErrorMsg = error?.response?.data?.error?.message;
-      console.error("Sheets GET Error:", googleErrorMsg || error?.response?.data || error);
-      res.status(500).json({ error: googleErrorMsg || error?.message || 'Failed to fetch from sheets.' });
+      console.error(
+        "Sheets GET Error:",
+        googleErrorMsg || error?.response?.data || error,
+      );
+      res
+        .status(500)
+        .json({
+          error:
+            googleErrorMsg || error?.message || "Failed to fetch from sheets.",
+        });
     }
   });
 
   // Add Book
-  app.post('/api/books', async (req, res) => {
+  app.post("/api/books", async (req, res) => {
     try {
       const sheetId = req.body.sheetId || process.env.GOOGLE_SHEETS_ID;
-      if (!sheetId) return res.status(400).json({ error: 'No Sheet ID provided' });
+      if (!sheetId)
+        return res.status(400).json({ error: "No Sheet ID provided" });
 
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr) return res.status(401).json({ error: 'Not authenticated' });
-      
+      if (!tokensStr)
+        return res.status(401).json({ error: "Not authenticated" });
+
       const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(process.env.OAUTH_CLIENT_ID, process.env.OAUTH_CLIENT_SECRET);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.OAUTH_CLIENT_ID,
+        process.env.OAUTH_CLIENT_SECRET,
+      );
       oauth2Client.setCredentials(tokens);
 
-      const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-      
-      const { name, author, publisher, investigator, classification, volumes, notes } = req.body.book;
+      const sheets = google.sheets({ version: "v4", auth: oauth2Client });
+
+      const {
+        name,
+        author,
+        publisher,
+        investigator,
+        classification,
+        volumes,
+        notes,
+      } = req.body.book;
 
       await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
-        range: 'A:G',
-        valueInputOption: 'USER_ENTERED',
+        range: "A:G",
+        valueInputOption: "USER_ENTERED",
         requestBody: {
-          values: [[name, author, publisher, investigator, classification, volumes, notes]]
-        }
+          values: [
+            [
+              name,
+              author,
+              publisher,
+              investigator,
+              classification,
+              volumes,
+              notes,
+            ],
+          ],
+        },
       });
 
       res.json({ success: true });
     } catch (error: any) {
       const googleErrorMsg = error?.response?.data?.error?.message;
-      console.error("Sheets POST Error:", googleErrorMsg || error?.response?.data || error);
-      res.status(500).json({ error: googleErrorMsg || error?.message || 'Failed to add book.' });
+      console.error(
+        "Sheets POST Error:",
+        googleErrorMsg || error?.response?.data || error,
+      );
+      res
+        .status(500)
+        .json({
+          error: googleErrorMsg || error?.message || "Failed to add book.",
+        });
     }
   });
 
   // Update Book
-  app.put('/api/books/:rowId', async (req, res) => {
+  app.put("/api/books/:rowId", async (req, res) => {
     try {
       const sheetId = req.body.sheetId || process.env.GOOGLE_SHEETS_ID;
       const rowId = req.params.rowId;
-      if (!sheetId) return res.status(400).json({ error: 'No Sheet ID provided' });
+      if (!sheetId)
+        return res.status(400).json({ error: "No Sheet ID provided" });
 
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr) return res.status(401).json({ error: 'Not authenticated' });
-      
+      if (!tokensStr)
+        return res.status(401).json({ error: "Not authenticated" });
+
       const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(process.env.OAUTH_CLIENT_ID, process.env.OAUTH_CLIENT_SECRET);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.OAUTH_CLIENT_ID,
+        process.env.OAUTH_CLIENT_SECRET,
+      );
       oauth2Client.setCredentials(tokens);
 
-      const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-      
-      const { name, author, publisher, investigator, classification, volumes, notes } = req.body.book;
+      const sheets = google.sheets({ version: "v4", auth: oauth2Client });
+
+      const {
+        name,
+        author,
+        publisher,
+        investigator,
+        classification,
+        volumes,
+        notes,
+      } = req.body.book;
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
         range: `A${rowId}:G${rowId}`,
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: "USER_ENTERED",
         requestBody: {
-          values: [[name, author, publisher, investigator, classification, volumes, notes]]
-        }
+          values: [
+            [
+              name,
+              author,
+              publisher,
+              investigator,
+              classification,
+              volumes,
+              notes,
+            ],
+          ],
+        },
       });
 
       res.json({ success: true });
     } catch (error: any) {
       const googleErrorMsg = error?.response?.data?.error?.message;
-      console.error("Sheets PUT Error:", googleErrorMsg || error?.response?.data || error);
-      res.status(500).json({ error: googleErrorMsg || error?.message || 'Failed to update book.' });
+      console.error(
+        "Sheets PUT Error:",
+        googleErrorMsg || error?.response?.data || error,
+      );
+      res
+        .status(500)
+        .json({
+          error: googleErrorMsg || error?.message || "Failed to update book.",
+        });
     }
   });
 
   // Delete Book (Clear Row)
-  app.delete('/api/books/:rowId', async (req, res) => {
+  app.delete("/api/books/:rowId", async (req, res) => {
     try {
-      const sheetId = req.headers['x-sheet-id'] || process.env.GOOGLE_SHEETS_ID;
+      const sheetId = req.headers["x-sheet-id"] || process.env.GOOGLE_SHEETS_ID;
       const rowId = req.params.rowId;
-      if (!sheetId) return res.status(400).json({ error: 'No Sheet ID provided' });
+      if (!sheetId)
+        return res.status(400).json({ error: "No Sheet ID provided" });
 
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr) return res.status(401).json({ error: 'Not authenticated' });
-      
+      if (!tokensStr)
+        return res.status(401).json({ error: "Not authenticated" });
+
       const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(process.env.OAUTH_CLIENT_ID, process.env.OAUTH_CLIENT_SECRET);
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.OAUTH_CLIENT_ID,
+        process.env.OAUTH_CLIENT_SECRET,
+      );
       oauth2Client.setCredentials(tokens);
 
-      const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-      
+      const sheets = google.sheets({ version: "v4", auth: oauth2Client });
+
       // We use clear instead of delete to avoid shifting rows and changing other row IDs
       await sheets.spreadsheets.values.clear({
         spreadsheetId: sheetId as string,
-        range: `A${rowId}:G${rowId}`
+        range: `A${rowId}:G${rowId}`,
       });
 
       res.json({ success: true });
     } catch (error: any) {
       const googleErrorMsg = error?.response?.data?.error?.message;
-      console.error("Sheets DELETE Error:", googleErrorMsg || error?.response?.data || error);
-      res.status(500).json({ error: googleErrorMsg || error?.message || 'Failed to delete book.' });
+      console.error(
+        "Sheets DELETE Error:",
+        googleErrorMsg || error?.response?.data || error,
+      );
+      res
+        .status(500)
+        .json({
+          error: googleErrorMsg || error?.message || "Failed to delete book.",
+        });
     }
   });
 
   // Example route for extracting book details from an image cover
-  app.post('/api/books/extract', upload.single('cover'), async (req, res) => {
+  app.post("/api/books/extract", upload.single("cover"), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ error: 'No image provided' });
+        return res.status(400).json({ error: "No image provided" });
       }
 
       const openrouterKey = process.env.OPENROUTER_API_KEY;
 
       if (!openrouterKey) {
-        throw new Error('OpenRouter API Key غير متوفر في النظام. الرجاء التحقق من متغيرات البيئة.');
+        throw new Error(
+          "OpenRouter API Key غير متوفر في النظام. الرجاء التحقق من متغيرات البيئة.",
+        );
       }
 
       // Initialize OpenRouter SDK
       const openrouter = new OpenRouter({
-        apiKey: openrouterKey
+        apiKey: openrouterKey,
       });
 
       // Convert image buffer to base64
-      const base64Image = req.file.buffer.toString('base64');
+      const base64Image = req.file.buffer.toString("base64");
       const mimeType = req.file.mimetype;
 
       // Call OpenRouter API with vision model
       const stream = await openrouter.chat.send({
         chatRequest: {
-          model: 'google/gemma-4-31b-it:free',
+          model: "google/gemini-3-flash-preview",
           messages: [
             {
-              role: 'user',
+              role: "user",
               content: [
                 {
-                  type: 'text',
-                  text: `Extract book details from this cover image. Return ONLY valid JSON:
-                {
-                  "bookName": "book title or empty string",
-                  "author": "author name or empty string",
-                  "publisher": "publisher name or empty string",
-                  "classification": "category like History, Literature, Science or empty string"
-                }`
+                  type: "text",
+                  text: `
+                    You are an expert OCR and data extraction AI specializing in Arabic text and document analysis. Your task is to extract bibliographic information from the provided image of a ledger, table, or book cover.
+
+You must extract the data and return it STRICTLY as a valid JSON object. Do not translate the extracted Arabic text; transcribe it exactly as it appears in the image.
+
+Use the following JSON schema and mapping rules:
+
+{
+  "name": "",           // Map to: "اسم الكتاب" (Book Title). Extract the full title.
+  "author": "",         // Map to: "المؤلف" (Author). Include any secondary authors if listed together.
+  "publisher": "",      // Map to: "دار النشر" (Publisher). 
+  "investigator": "",   // Map to: "المحقق" (Investigator/Editor). 
+  "classification": "", // Map to: "التصنيف" (Classification/Genre).
+  "volumes": null,      // Map to: "عدد المجلدات" (Number of Volumes). Extract as an integer if it is a clear number, otherwise extract as a string.
+  "notes": ""           // Map to: "ملاحظات" (Notes). Extract any remaining text in this section.
+}
+
+STRICT EXTRACTION RULES:
+1. Preserve Original Text: Transcribe the Arabic characters exactly as written. Do not correct grammar or attempt to translate the text into English.
+2. Handling Empty Fields: If a column or field is blank in the image, output \`null\` for that specific JSON key. Do NOT use "N/A", "None", or empty strings ("").
+3. Illegible Text: If the handwriting is completely unreadable, output \`null\`. If it is partially readable, transcribe what you can confidently see and use a question mark in brackets [؟] for the illegible parts.
+4. No Hallucinations: Do NOT guess, infer, or search for external information to fill in missing gaps. Only extract what is explicitly visible in the image.
+5. Output Format: Output ONLY the raw JSON object. Do not include markdown blocks (like \`\`\`json), and do not include any introductory or concluding conversational text. Your entire response must be parseable by \`JSON.parse()\`.
+                  `,
                 },
                 {
-                  type: 'image_url',
+                  type: "image_url",
                   imageUrl: {
-                    url: `data:${mimeType};base64,${base64Image}`
-                  }
-                }
-              ]
-            }
+                    url: `data:${mimeType};base64,${base64Image}`,
+                  },
+                },
+              ],
+            },
           ],
-          stream: true
-        }
+          stream: true,
+        },
       });
 
       // Collect streamed response
-      let fullResponse = '';
+      let fullResponse = "";
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content;
         if (content) {
@@ -331,10 +448,12 @@ async function startServer() {
       }
 
       if (!fullResponse) {
-        return res.status(500).json({ error: 'Failed to extract text from image' });
+        return res
+          .status(500)
+          .json({ error: "Failed to extract text from image" });
       }
 
-      console.log('OpenRouter Response:', fullResponse);
+      console.log("OpenRouter Response:", fullResponse);
 
       // Parse JSON from response (might have markdown code blocks)
       let jsonStr = fullResponse;
@@ -346,24 +465,71 @@ async function startServer() {
       const extractedData = JSON.parse(jsonStr);
       res.json(extractedData);
     } catch (error: any) {
-      console.error('OpenRouter Error:', error.message);
-      console.error('Full Error:', JSON.stringify(error.response?.data || error, null, 2));
+      const statusCode =
+        error?.statusCode ||
+        error?.status ||
+        error?.response?.status ||
+        error?.error?.code;
+      const providerRawMessage = (() => {
+        if (error?.data$?.error?.metadata?.raw)
+          return error.data$.error.metadata.raw;
+        if (error?.error?.metadata?.raw) return error.error.metadata.raw;
+        if (typeof error?.body === "string") {
+          try {
+            const parsed = JSON.parse(error.body);
+            return parsed?.error?.metadata?.raw;
+          } catch {
+            return undefined;
+          }
+        }
+        return undefined;
+      })();
 
-      if (error.message?.includes('API key')) {
-        return res.status(400).json({ error: 'مفتاح OpenRouter غير صالح أو غير موجود.' });
+      console.error("OpenRouter Error:", error.message);
+      console.error(
+        "Full Error:",
+        JSON.stringify(error.response?.data || error, null, 2),
+      );
+
+      if (error.message?.includes("API key")) {
+        return res
+          .status(400)
+          .json({ error: "مفتاح OpenRouter غير صالح أو غير موجود." });
       }
 
-      if (error.status === 429) {
-        return res.status(429).json({ error: 'لقد تجاوزت حد الطلبات. يرجى المحاولة لاحقاً.' });
+      if (statusCode === 429) {
+        return res.status(429).json({
+          error:
+            providerRawMessage ||
+            "الخدمة مزدحمة أو تم تجاوز حد الطلبات المؤقت. حاول مرة أخرى بعد قليل.",
+        });
       }
 
-      if (error.status === 400) {
-        const errorMsg = error.message || 'تعذر معالجة الصورة، قد تكون الصيغة غير مدعومة أو الصورة تالفة.';
-        console.error('400 Error Details:', errorMsg);
+      if (statusCode === 400) {
+        const errorMsg =
+          providerRawMessage ||
+          error.message ||
+          "تعذر معالجة الصورة، قد تكون الصيغة غير مدعومة أو الصورة تالفة.";
+        console.error("400 Error Details:", errorMsg);
         return res.status(400).json({ error: errorMsg });
       }
 
-      res.status(500).json({ error: error.message || 'Error parsing image' });
+      if (
+        typeof statusCode === "number" &&
+        statusCode >= 401 &&
+        statusCode < 500
+      ) {
+        return res.status(statusCode).json({
+          error:
+            providerRawMessage || error.message || "فشل الطلب إلى OpenRouter.",
+        });
+      }
+
+      res
+        .status(500)
+        .json({
+          error: providerRawMessage || error.message || "Error parsing image",
+        });
     }
   });
 

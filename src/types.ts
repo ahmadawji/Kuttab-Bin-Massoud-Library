@@ -6,5 +6,7 @@ export interface Book {
   investigator: string;
   classification: string;
   volumes: string;
+  edition: string;
+  code: string;
   notes: string;
 }

@@ -1,18 +1,37 @@
 import React, { useState, useEffect } from "react";
-import { BookOpen, LogIn, Loader2 } from "lucide-react";
+import { Download, LogIn, Loader2 } from "lucide-react";
 import { SetupScreen } from "./components/SetupScreen";
 import { LibraryManager } from "./components/LibraryManager";
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
 
 export default function App() {
   const [configStatus, setConfigStatus] = useState<
     "checking" | "configured" | "unconfigured"
   >("checking");
   const [user, setUser] = useState<any>(null);
+  const [isGuestMode, setIsGuestMode] = useState(
+    false || localStorage.getItem("guestMode") === "true",
+  );
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
   const kottabLogo = new URL(
     "../src/lib/images/Kottab Logo.jpg",
     import.meta.url,
   ).href;
+
+  const checkStandaloneMode = () => {
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+    const isIosStandalone =
+      (window.navigator as Navigator & { standalone?: boolean }).standalone ===
+      true;
+    return isStandalone || isIosStandalone;
+  };
 
   // Check backend configuration
   useEffect(() => {
@@ -30,12 +49,38 @@ export default function App() {
       })
       .then((data) => {
         setUser(data);
+        setIsGuestMode(false);
         setIsLoadingAuth(false);
       })
       .catch(() => {
         setUser(null);
         setIsLoadingAuth(false);
       });
+  }, []);
+
+  useEffect(() => {
+    setIsInstalled(checkStandaloneMode());
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    return () => {
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
+      );
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
   }, []);
 
   const handleLogin = async () => {
@@ -52,7 +97,10 @@ export default function App() {
           // Reload user
           fetch("/api/auth/me")
             .then((r) => r.json())
-            .then((u) => setUser(u));
+            .then((u) => {
+              setUser(u);
+              setIsGuestMode(false);
+            });
         }
       };
       window.addEventListener("message", handleMessage);
@@ -64,22 +112,63 @@ export default function App() {
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
+    setIsGuestMode(false);
   };
 
+  const handleContinueAsGuest = () => {
+    setUser(null);
+    setIsGuestMode(true);
+    localStorage.setItem("guestMode", "true");
+  };
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+
+      if (outcome === "accepted") {
+        setDeferredPrompt(null);
+      }
+      return;
+    }
+
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+    if (isIOS) {
+      alert(
+        "لتثبيت التطبيق على iPhone/iPad:\n1) افتح زر المشاركة في Safari\n2) اختر (Add to Home Screen)\n3) اضغط إضافة.",
+      );
+      return;
+    }
+
+    alert(
+      "التثبيت غير متاح تلقائياً في هذا المتصفح حالياً.\nاستخدم قائمة المتصفح ثم اختر Install app أو Add to Home screen.",
+    );
+  };
+
+  const installButton = !isInstalled && (
+    <button
+      onClick={handleInstallApp}
+      className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-full bg-[var(--brand-primary)] px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:brightness-105"
+      aria-label="تثبيت التطبيق"
+    >
+      <Download className="h-4 w-4" />
+      <span>تثبيت التطبيق</span>
+    </button>
+  );
+
+  let content: React.ReactNode;
+
   if (configStatus === "checking" || isLoadingAuth) {
-    return (
+    content = (
       <div className="min-h-screen flex items-center justify-center bg-transparent">
         <Loader2 className="w-8 h-8 animate-spin text-[var(--brand-primary)]" />
       </div>
     );
-  }
-
-  if (configStatus === "unconfigured") {
-    return <SetupScreen />;
-  }
-
-  if (!user) {
-    return (
+  } else if (configStatus === "unconfigured") {
+    content = <SetupScreen />;
+  } else if (!user && !isGuestMode) {
+    content = (
       <div className="min-h-screen flex flex-col items-center justify-center bg-transparent p-6">
         <div className="max-w-md w-full bg-[var(--brand-surface)] border border-amber-100 rounded-2xl shadow-xl p-8 text-center space-y-6">
           <img
@@ -101,10 +190,30 @@ export default function App() {
             <LogIn className="w-5 h-5" />
             <span>تسجيل الدخول باستخدام Google</span>
           </button>
+          <button
+            onClick={handleContinueAsGuest}
+            className="w-full border border-amber-200 text-[var(--brand-muted)] rounded-xl py-3 px-4 font-semibold hover:bg-amber-50 transition"
+          >
+            المتابعة كزائر (عرض فقط)
+          </button>
         </div>
       </div>
     );
+  } else {
+    content = (
+      <LibraryManager
+        user={user}
+        onLogout={handleLogout}
+        onLogin={handleLogin}
+        isReadOnly={!user}
+      />
+    );
   }
 
-  return <LibraryManager user={user} onLogout={handleLogout} />;
+  return (
+    <>
+      {content}
+      {installButton}
+    </>
+  );
 }

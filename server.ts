@@ -150,34 +150,48 @@ async function startServer() {
         return res.status(400).json({ error: "No Sheet ID provided" });
 
       const tokensStr = req.cookies.g_tokens;
-      if (!tokensStr)
-        return res.status(401).json({ error: "Not authenticated" });
+      let sheets;
 
-      const tokens = JSON.parse(tokensStr);
-      const oauth2Client = new google.auth.OAuth2(
-        process.env.OAUTH_CLIENT_ID,
-        process.env.OAUTH_CLIENT_SECRET,
-      );
-      oauth2Client.setCredentials(tokens);
-
-      const sheets = google.sheets({ version: "v4", auth: oauth2Client });
+      if (tokensStr) {
+        const tokens = JSON.parse(tokensStr);
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.OAUTH_CLIENT_ID,
+          process.env.OAUTH_CLIENT_SECRET,
+        );
+        oauth2Client.setCredentials(tokens);
+        sheets = google.sheets({ version: "v4", auth: oauth2Client });
+      } else {
+        const apiKey = process.env.GOOGLE_API_KEY;
+        if (!apiKey) {
+          return res.status(401).json({
+            error:
+              "Guest access is not configured. Add GOOGLE_API_KEY in env to allow read-only access without login.",
+          });
+        }
+        sheets = google.sheets({ version: "v4", auth: apiKey });
+      }
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId as string,
-        range: "A2:G", // Removed Sheet1! to use default first sheet regardless of language
+        range: "A2:I", // Removed Sheet1! to use default first sheet regardless of language
       });
 
       const rows = response.data.values || [];
-      const books = rows.map((row, index) => ({
-        id: index + 2, // Row number in sheet (used for update/delete)
-        name: row[0] || "",
-        author: row[1] || "",
-        publisher: row[2] || "",
-        investigator: row[3] || "",
-        classification: row[4] || "",
-        volumes: row[5] || "",
-        notes: row[6] || "",
-      }));
+      const books = rows.map((row, index) => {
+        console.log("Row Data:", row); // Debug log to check row content
+        return {
+          id: index + 2, // Row number in sheet (used for update/delete)
+          name: row[0] || "",
+          author: row[1] || "",
+          publisher: row[2] || "",
+          investigator: row[3] || "",
+          classification: row[4] || "",
+          volumes: row[5] || "",
+          edition: row[6] || "",
+          code: row[7] || "",
+          notes: row[8] || "",
+        };
+      });
 
       res.json(books);
     } catch (error: any) {
@@ -186,12 +200,10 @@ async function startServer() {
         "Sheets GET Error:",
         googleErrorMsg || error?.response?.data || error,
       );
-      res
-        .status(500)
-        .json({
-          error:
-            googleErrorMsg || error?.message || "Failed to fetch from sheets.",
-        });
+      res.status(500).json({
+        error:
+          googleErrorMsg || error?.message || "Failed to fetch from sheets.",
+      });
     }
   });
 
@@ -222,6 +234,8 @@ async function startServer() {
         investigator,
         classification,
         volumes,
+        edition,
+        code,
         notes,
       } = req.body.book;
 
@@ -238,6 +252,8 @@ async function startServer() {
               investigator,
               classification,
               volumes,
+              edition,
+              code,
               notes,
             ],
           ],
@@ -251,11 +267,9 @@ async function startServer() {
         "Sheets POST Error:",
         googleErrorMsg || error?.response?.data || error,
       );
-      res
-        .status(500)
-        .json({
-          error: googleErrorMsg || error?.message || "Failed to add book.",
-        });
+      res.status(500).json({
+        error: googleErrorMsg || error?.message || "Failed to add book.",
+      });
     }
   });
 
@@ -287,12 +301,14 @@ async function startServer() {
         investigator,
         classification,
         volumes,
+        edition,
+        code,
         notes,
       } = req.body.book;
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: `A${rowId}:G${rowId}`,
+        range: `A${rowId}:I${rowId}`,
         valueInputOption: "USER_ENTERED",
         requestBody: {
           values: [
@@ -303,6 +319,8 @@ async function startServer() {
               investigator,
               classification,
               volumes,
+              edition,
+              code,
               notes,
             ],
           ],
@@ -316,11 +334,9 @@ async function startServer() {
         "Sheets PUT Error:",
         googleErrorMsg || error?.response?.data || error,
       );
-      res
-        .status(500)
-        .json({
-          error: googleErrorMsg || error?.message || "Failed to update book.",
-        });
+      res.status(500).json({
+        error: googleErrorMsg || error?.message || "Failed to update book.",
+      });
     }
   });
 
@@ -348,7 +364,7 @@ async function startServer() {
       // We use clear instead of delete to avoid shifting rows and changing other row IDs
       await sheets.spreadsheets.values.clear({
         spreadsheetId: sheetId as string,
-        range: `A${rowId}:G${rowId}`,
+        range: `A${rowId}:I${rowId}`,
       });
 
       res.json({ success: true });
@@ -358,11 +374,9 @@ async function startServer() {
         "Sheets DELETE Error:",
         googleErrorMsg || error?.response?.data || error,
       );
-      res
-        .status(500)
-        .json({
-          error: googleErrorMsg || error?.message || "Failed to delete book.",
-        });
+      res.status(500).json({
+        error: googleErrorMsg || error?.message || "Failed to delete book.",
+      });
     }
   });
 
@@ -412,8 +426,10 @@ Use the following JSON schema and mapping rules:
   "author": "",         // Map to: "المؤلف" (Author). Include any secondary authors if listed together.
   "publisher": "",      // Map to: "دار النشر" (Publisher). 
   "investigator": "",   // Map to: "المحقق" (Investigator/Editor). 
-  "classification": "", // Map to: "التصنيف" (Classification/Genre).
-  "volumes": null,      // Map to: "عدد المجلدات" (Number of Volumes). Extract as an integer if it is a clear number, otherwise extract as a string.
+  "classification": "", // Map to: "التصنيف" (Classification/Genre). Analyze the content to determine the appropriate classification.
+  "volumes": 0,         // Map to: "عدد المجلدات" (Number of Volumes). Extract only an integer. 
+  "Edition/Date": ""    // Map to: "الطبعة/التاريخ". Extract when it's published if it appears on the cover.
+  "code": ""            // Map to: "الرمز". Extract book code if available.
   "notes": ""           // Map to: "ملاحظات" (Notes). Extract any remaining text in this section.
 }
 
@@ -525,11 +541,9 @@ STRICT EXTRACTION RULES:
         });
       }
 
-      res
-        .status(500)
-        .json({
-          error: providerRawMessage || error.message || "Error parsing image",
-        });
+      res.status(500).json({
+        error: providerRawMessage || error.message || "Error parsing image",
+      });
     }
   });
 

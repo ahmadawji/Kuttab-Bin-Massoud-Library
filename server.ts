@@ -173,7 +173,7 @@ async function startServer() {
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId as string,
-        range: "A2:I", // Removed Sheet1! to use default first sheet regardless of language
+        range: "A2:K", // Removed Sheet1! to use default first sheet regardless of language
       });
 
       const rows = response.data.values || [];
@@ -190,6 +190,8 @@ async function startServer() {
           edition: row[6] || "",
           code: row[7] || "",
           notes: row[8] || "",
+          coverType: row[9] || "",
+          dateInserted: row[10] || "",
         };
       });
 
@@ -237,11 +239,13 @@ async function startServer() {
         edition,
         code,
         notes,
+        coverType,
+        dateInserted,
       } = req.body.book;
 
       await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
-        range: "A:G",
+        range: "A:K",
         valueInputOption: "USER_ENTERED",
         requestBody: {
           values: [
@@ -255,6 +259,8 @@ async function startServer() {
               edition,
               code,
               notes,
+              coverType,
+              dateInserted,
             ],
           ],
         },
@@ -304,11 +310,13 @@ async function startServer() {
         edition,
         code,
         notes,
+        coverType,
+        dateInserted,
       } = req.body.book;
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: `A${rowId}:I${rowId}`,
+        range: `A${rowId}:K${rowId}`,
         valueInputOption: "USER_ENTERED",
         requestBody: {
           values: [
@@ -322,6 +330,8 @@ async function startServer() {
               edition,
               code,
               notes,
+              coverType,
+              dateInserted,
             ],
           ],
         },
@@ -364,7 +374,7 @@ async function startServer() {
       // We use clear instead of delete to avoid shifting rows and changing other row IDs
       await sheets.spreadsheets.values.clear({
         spreadsheetId: sheetId as string,
-        range: `A${rowId}:I${rowId}`,
+        range: `A${rowId}:K${rowId}`,
       });
 
       res.json({ success: true });

@@ -3,11 +3,6 @@ import { Download, LogIn, Loader2 } from "lucide-react";
 import { SetupScreen } from "./components/SetupScreen";
 import { LibraryManager } from "./components/LibraryManager";
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
-
 export default function App() {
   const [configStatus, setConfigStatus] = useState<
     "checking" | "configured" | "unconfigured"
@@ -17,9 +12,7 @@ export default function App() {
     false || localStorage.getItem("guestMode") === "true",
   );
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-  const [deferredPrompt, setDeferredPrompt] =
-    useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+
   const kottabLogo = new URL(
     "../src/lib/images/Kottab Logo.jpg",
     import.meta.url,
@@ -56,31 +49,6 @@ export default function App() {
         setUser(null);
         setIsLoadingAuth(false);
       });
-  }, []);
-
-  useEffect(() => {
-    setIsInstalled(checkStandaloneMode());
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener(
-        "beforeinstallprompt",
-        handleBeforeInstallPrompt,
-      );
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
   }, []);
 
   const handleLogin = async () => {
@@ -120,42 +88,6 @@ export default function App() {
     setIsGuestMode(true);
     localStorage.setItem("guestMode", "true");
   };
-
-  const handleInstallApp = async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-
-      if (outcome === "accepted") {
-        setDeferredPrompt(null);
-      }
-      return;
-    }
-
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-
-    if (isIOS) {
-      alert(
-        "لتثبيت التطبيق على iPhone/iPad:\n1) افتح زر المشاركة في Safari\n2) اختر (Add to Home Screen)\n3) اضغط إضافة.",
-      );
-      return;
-    }
-
-    alert(
-      "التثبيت غير متاح تلقائياً في هذا المتصفح حالياً.\nاستخدم قائمة المتصفح ثم اختر Install app أو Add to Home screen.",
-    );
-  };
-
-  const installButton = !isInstalled && (
-    <button
-      onClick={handleInstallApp}
-      className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-full bg-[var(--brand-primary)] px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:brightness-105"
-      aria-label="تثبيت التطبيق"
-    >
-      <Download className="h-4 w-4" />
-      <span>تثبيت التطبيق</span>
-    </button>
-  );
 
   let content: React.ReactNode;
 
@@ -210,10 +142,5 @@ export default function App() {
     );
   }
 
-  return (
-    <>
-      {content}
-      {installButton}
-    </>
-  );
+  return <>{content}</>;
 }

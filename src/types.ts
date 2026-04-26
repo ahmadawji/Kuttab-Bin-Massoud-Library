@@ -9,4 +9,6 @@ export interface Book {
   edition: string;
   code: string;
   notes: string;
+  coverType: string;
+  dateInserted: string;
 }

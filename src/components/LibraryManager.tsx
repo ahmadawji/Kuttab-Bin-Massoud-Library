@@ -32,7 +32,9 @@ export function LibraryManager({
     .href;
 
   const [sheetId, setSheetId] = useState(
-    () => localStorage.getItem("library_sheet_id") || "",
+    () =>
+      localStorage.getItem("library_sheet_id") ||
+      "https://docs.google.com/spreadsheets/d/1HZm4tRl28DnezvhawW_TwEG2pBIc80Wh0ANJE60kCbw",
   );
   const [isSheetSet, setIsSheetSet] = useState(!!sheetId);
 
@@ -123,10 +125,16 @@ export function LibraryManager({
     const method = isEditing ? "PUT" : "POST";
 
     try {
+      let bookToSave = {
+        ...book,
+        coverType: book.coverType || "",
+        dateInserted: new Date().toISOString(),
+      };
+      console.log("Saving book:", bookToSave);
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ book, sheetId }),
+        body: JSON.stringify({ book: bookToSave, sheetId }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -212,15 +220,20 @@ export function LibraryManager({
     );
   }
 
-  const filteredBooks = books.filter(
-    (b) =>
-      b.name.includes(searchQuery) ||
-      b.author.includes(searchQuery) ||
-      b.classification.includes(searchQuery) ||
-      b.publisher.includes(searchQuery) ||
-      b.investigator.includes(searchQuery) ||
-      b.notes.includes(searchQuery),
-  );
+  const filteredBooks = books
+    .filter(
+      (b) =>
+        b.name.includes(searchQuery) ||
+        b.author.includes(searchQuery) ||
+        b.classification.includes(searchQuery) ||
+        b.publisher.includes(searchQuery) ||
+        b.investigator.includes(searchQuery) ||
+        b.notes.includes(searchQuery),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.dateInserted).getTime() - new Date(a.dateInserted).getTime(),
+    );
 
   const totalPages = Math.ceil(filteredBooks.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;

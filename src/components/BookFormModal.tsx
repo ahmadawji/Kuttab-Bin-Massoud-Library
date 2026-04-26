@@ -21,6 +21,8 @@ export function BookFormModal({ book, onClose, onSave }: BookFormModalProps) {
       edition: "",
       code: "",
       notes: "",
+      coverType: "",
+      dateInserted: "",
     },
   );
   const [isScanning, setIsScanning] = useState(false);
@@ -61,8 +63,8 @@ export function BookFormModal({ book, onClose, onSave }: BookFormModalProps) {
         name: data.name || data.bookName || prev.name,
         author: data.author || prev.author,
         publisher: data.publisher || prev.publisher,
-        classification: data.classification || prev.classification,
         investigator: data.investigator || prev.investigator,
+        classification: data.classification || prev.classification,
         volumes: data.volumes ? String(data.volumes) : prev.volumes,
         edition: data.edition || prev.edition,
         code: data.code || prev.code,

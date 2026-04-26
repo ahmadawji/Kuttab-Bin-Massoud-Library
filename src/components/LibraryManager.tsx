@@ -32,9 +32,8 @@ export function LibraryManager({
     .href;
 
   const [sheetId, setSheetId] = useState(
-    () =>
-      localStorage.getItem("library_sheet_id") ||
-      "https://docs.google.com/spreadsheets/d/1HZm4tRl28DnezvhawW_TwEG2pBIc80Wh0ANJE60kCbw",
+    localStorage.getItem("library_sheet_id") ||
+      "1HZm4tRl28DnezvhawW_TwEG2pBIc80Wh0ANJE60kCbw",
   );
   const [isSheetSet, setIsSheetSet] = useState(!!sheetId);
 
@@ -58,6 +57,7 @@ export function LibraryManager({
         throw new Error(errorData.error || "فشل في تحميل البيانات");
       }
       const data = await res.json();
+      console.log("Fetched books:", data);
       setBooks(data.filter((b: Book) => b.name || b.author || b.publisher));
     } catch (e: any) {
       if (
@@ -79,7 +79,7 @@ export function LibraryManager({
           );
           onLogout();
         }
-      } else if (e.message?.includes("not found")) {
+      } else if (e.message?.includes("not found") && !sheetId) {
         alert(
           "حدث خطأ: لم يتم العثور على جدول البيانات! \n\nتأكد من:\n1. أن المعرف (Sheet ID) صحيح تماماً ولا يحتوي على الحروف الإضافية في الرابط.\n2. أنك قمت بإنشاء الجدول باستخدام الحساب الذي دخلت به.",
         );

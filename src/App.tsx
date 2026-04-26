@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Download, LogIn, Loader2 } from "lucide-react";
+import { LogIn, Loader2 } from "lucide-react";
 import { SetupScreen } from "./components/SetupScreen";
 import { LibraryManager } from "./components/LibraryManager";
 
@@ -17,14 +17,6 @@ export default function App() {
     "../src/lib/images/Kottab Logo.jpg",
     import.meta.url,
   ).href;
-
-  const checkStandaloneMode = () => {
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    const isIosStandalone =
-      (window.navigator as Navigator & { standalone?: boolean }).standalone ===
-      true;
-    return isStandalone || isIosStandalone;
-  };
 
   // Check backend configuration
   useEffect(() => {

@@ -94,11 +94,24 @@ async function startServer() {
         <html>
           <body>
             <script>
+              const notifyAuthSuccess = () => {
+                try {
+                  localStorage.setItem('oauth_auth_success', String(Date.now()));
+                } catch (_) {
+                  // ignore storage errors in private/locked-down contexts
+                }
+              };
+
+              notifyAuthSuccess();
+
               if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+                window.opener.postMessage(
+                  { type: 'OAUTH_AUTH_SUCCESS' },
+                  ${JSON.stringify(origin)}
+                );
                 window.close();
               } else {
-                window.location.href = '/';
+                window.location.href = '/?auth=success';
               }
             </script>
             <p>Authentication successful. This window should close automatically.</p>

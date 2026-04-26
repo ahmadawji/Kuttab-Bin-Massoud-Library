@@ -44,27 +44,75 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
+    let popup: Window | null = null;
+    let popupCheckTimer: number | null = null;
+
+    const cleanup = () => {
+      if (popupCheckTimer !== null) {
+        window.clearInterval(popupCheckTimer);
+        popupCheckTimer = null;
+      }
+      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("storage", handleStorage);
+    };
+
+    const completeLogin = () => {
+      fetch("/api/auth/me")
+        .then((r) => {
+          if (!r.ok) throw new Error("Not logged in");
+          return r.json();
+        })
+        .then((u) => {
+          setUser(u);
+          setIsGuestMode(false);
+          localStorage.removeItem("guestMode");
+          if (popup && !popup.closed) {
+            popup.close();
+          }
+        })
+        .finally(cleanup);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (popup && event.source !== popup) return;
+      if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
+        completeLogin();
+      }
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key === "oauth_auth_success" &&
+        event.newValue &&
+        document.visibilityState === "visible"
+      ) {
+        completeLogin();
+      }
+    };
+
     try {
       const res = await fetch(
         `/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`,
       );
       const { url } = await res.json();
-      const popup = window.open(url, "google_login", "width=500,height=600");
+      popup = window.open(url, "google_login", "width=500,height=600");
 
-      const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
-          window.removeEventListener("message", handleMessage);
-          // Reload user
-          fetch("/api/auth/me")
-            .then((r) => r.json())
-            .then((u) => {
-              setUser(u);
-              setIsGuestMode(false);
-            });
-        }
-      };
+      if (!popup) {
+        throw new Error("Popup blocked");
+      }
+
       window.addEventListener("message", handleMessage);
+      window.addEventListener("storage", handleStorage);
+
+      // If postMessage doesn't reach the opener, detect popup close and refresh auth state.
+      popupCheckTimer = window.setInterval(() => {
+        if (popup && popup.closed) {
+          completeLogin();
+        }
+      }, 700);
     } catch (e) {
+      cleanup();
       alert("فشل في بدء تسجيل الدخول");
     }
   };

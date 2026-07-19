@@ -82,10 +82,12 @@ async function startServer() {
 
       const { tokens } = await oauth2Client.getToken(code as string);
 
-      // Store token in a secure HttpOnly cookie
+      // Store token in a secure HttpOnly cookie (only set secure/SameSite=None if HTTPS)
+      const isSecure =
+        req.secure || req.headers["x-forwarded-proto"] === "https";
       res.cookie("g_tokens", JSON.stringify(tokens), {
-        secure: true,
-        sameSite: "none",
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
         httpOnly: true,
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
@@ -128,6 +130,7 @@ async function startServer() {
   app.get("/api/auth/me", async (req, res) => {
     try {
       const tokensStr = req.cookies.g_tokens;
+      console.log("Tokens str:", tokensStr);
       if (!tokensStr)
         return res.status(401).json({ error: "Not authenticated" });
 
@@ -147,9 +150,10 @@ async function startServer() {
   });
 
   app.post("/api/auth/logout", (req, res) => {
+    const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https";
     res.clearCookie("g_tokens", {
-      secure: true,
-      sameSite: "none",
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
       httpOnly: true,
     });
     res.json({ success: true });

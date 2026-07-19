@@ -18,29 +18,53 @@ export default function App() {
     import.meta.url,
   ).href;
 
-  // Check backend configuration
+  // Check backend configuration and user auth
   useEffect(() => {
-    fetch("/api/auth/status")
-      .then((res) => res.json())
-      .then((data) => {
-        setConfigStatus(data.configured ? "configured" : "unconfigured");
-      })
-      .catch(() => setConfigStatus("unconfigured"));
+    let active = true;
 
-    fetch("/api/auth/me")
-      .then((res) => {
-        if (!res.ok) throw new Error("Not logged in");
-        return res.json();
-      })
-      .then((data) => {
-        setUser(data);
-        setIsGuestMode(false);
-        setIsLoadingAuth(false);
-      })
-      .catch(() => {
-        setUser(null);
-        setIsLoadingAuth(false);
-      });
+    const initialize = async () => {
+      try {
+        const configRes = await fetch("/api/auth/status");
+        if (!configRes.ok) throw new Error("Config check failed");
+        const configData = await configRes.json();
+
+        if (!active) return;
+
+        if (configData.configured) {
+          setConfigStatus("configured");
+          // Only check auth status if OAuth is configured
+          try {
+            const authRes = await fetch("/api/auth/me");
+            if (!authRes.ok) throw new Error("Not logged in");
+            const userData = await authRes.json();
+            if (active) {
+              setUser(userData);
+              setIsGuestMode(false);
+              setIsLoadingAuth(false);
+            }
+          } catch {
+            if (active) {
+              setUser(null);
+              setIsLoadingAuth(false);
+            }
+          }
+        } else {
+          setConfigStatus("unconfigured");
+          setIsLoadingAuth(false);
+        }
+      } catch {
+        if (active) {
+          setConfigStatus("unconfigured");
+          setIsLoadingAuth(false);
+        }
+      }
+    };
+
+    initialize();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleLogin = async () => {
